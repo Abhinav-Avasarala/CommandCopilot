@@ -99,30 +99,56 @@ cd terminal-copilot
 
 ---
 
-### Step 3 — Run Setup Script
+### Step 3 — Download Kafka Manually (VCL has no internet access)
+
+> **Important:** The VCL machine cannot reach the internet, so `wget` inside `setup.sh` will silently fail. You must download Kafka on your laptop and `scp` it to VCL **before** running `setup.sh`.
+
+**On your laptop:**
+```bash
+# wget is not available on Mac by default — use curl with the -L flag to follow redirects
+curl -L -O https://archive.apache.org/dist/kafka/3.7.0/kafka_2.13-3.7.0.tgz
+
+# Verify the file is ~114MB (a few hundred bytes means curl got an error page, not the real file)
+ls -lh kafka_2.13-3.7.0.tgz
+```
+
+> **Common mistake:** Using `curl -O` without `-L` downloads only ~196 bytes (an HTML redirect page), not the actual Kafka archive. Always use `-L`.
+
+Once you have the real file (~114MB), copy it to VCL:
+```bash
+scp kafka_2.13-3.7.0.tgz <unity_id>@152.7.179.171:/share/dsa440s26/aavasar/
+```
+
+You will be prompted for your Unity password and Duo two-factor authentication.
+
+---
+
+### Step 4 — Run Setup Script
 
 ```bash
+cd /share/dsa440s26/aavasar/terminal-copilot
 bash setup.sh
 ```
 
 This will:
-- Download Kafka 3.7.0 to `/share/dsa440s26/aavasar/`
-- Configure it to store data in `/share/dsa440s26/aavasar/kafka-data/`
+- Copy Kafka 3.7.0 from `/share/dsa440s26/aavasar/` (no internet needed)
+- Extract and configure it to store data in `~/kafka-data/`
 - Install the `kafka-python` pip package
 
-If the script prompts about Java module and fails, that's fine — you already installed Java via `apt` above. The rest of the script will still run.
+**What the script does NOT do anymore:** download Kafka via `wget` — this was replaced with a local `cp` because VCL has no internet access.
 
-> **Note:** If `wget` fails to download Kafka, the VCL machine may not have internet access.
-> In that case, download Kafka on your laptop and `scp` it over:
-> ```bash
-> # Run this on your laptop (not on VCL):
-> scp kafka_2.13-3.7.0.tgz <unity_id>@152.14.xx.xx:/share/dsa440s26/aavasar/
-> ```
-> Then on VCL:
-> ```bash
-> cd /share/dsa440s26/aavasar
-> tar -xzf kafka_2.13-3.7.0.tgz
-> ```
+Expected output when successful:
+```
+[1/4] Loading Java module...        ← Java loads fine
+[2/4] Copying Kafka 3.7.0...        ← Copies from shared dir
+[3/4] Configuring Kafka...          ← Sets up data directories
+[4/4] Installing Python package...  ← Installs kafka-python
+Setup complete!
+```
+
+> **If the script stops after `[2/4]` with no further output**, the `kafka_2.13-3.7.0.tgz` file is missing from `/share/dsa440s26/aavasar/`. Go back to Step 3 and re-scp it.
+
+> **Note:** `setup.sh` must be run from inside the `terminal-copilot/` directory, not from `/share/dsa440s26/aavasar/`. Running `bash setup.sh` from the parent directory will give `No such file or directory`.
 
 ---
 
@@ -319,6 +345,22 @@ pip3 install kafka-python
 pip3 install --user kafka-python
 ```
 
+### setup.sh stops after [2/4] with no error
+The Kafka tarball is missing from `/share/dsa440s26/aavasar/`. Download it on your laptop with `curl -L` and `scp` it over. See Part 2, Step 3.
+
+### curl downloaded only ~196 bytes
+You used `curl -O` without `-L`. The URL redirects to a mirror and without `-L`, curl saves the redirect HTML instead of the actual file. Always use:
+```bash
+curl -L -O https://archive.apache.org/dist/kafka/3.7.0/kafka_2.13-3.7.0.tgz
+```
+
+### "bash: setup.sh: No such file or directory"
+You're in the wrong directory. The script lives inside `terminal-copilot/`:
+```bash
+cd /share/dsa440s26/aavasar/terminal-copilot
+bash setup.sh
+```
+
 ### VCL reservation expired mid-session
 Your work is lost if you didn't save. For future sessions:
 - Push code to GitHub before the reservation ends
@@ -332,6 +374,8 @@ Your work is lost if you didn't save. For future sessions:
 |------|---------|---------|
 | Connect to VCL | `ssh <unity_id>@<VCL_IP>` | all 3 |
 | Install Java (if needed) | `sudo apt install -y default-jdk` | T1 (once) |
+| Download Kafka (on laptop) | `curl -L -O https://archive.apache.org/dist/kafka/3.7.0/kafka_2.13-3.7.0.tgz` | laptop |
+| Copy Kafka to VCL | `scp kafka_2.13-3.7.0.tgz <unity_id>@<VCL_IP>:/share/dsa440s26/aavasar/` | laptop |
 | One-time setup | `bash setup.sh` | T1 (once) |
 | Start Kafka | `bash start_kafka.sh` | T1 |
 | Create topics (once) | `bash create_topics.sh` | T2 |
@@ -339,3 +383,60 @@ Your work is lost if you didn't save. For future sessions:
 | Quick test | `echo "error text" \| python3 fixit.py` | T3 |
 | Real test | `python3 broken.py 2>&1 \| python3 fixit.py` | T3 |
 | Stop everything | `bash stop_kafka.sh` + Ctrl+C in T2 | T1 |
+
+---
+
+## Part 6: Stopping & Restarting (Every Session)
+
+### Stopping Everything
+
+**Terminal 2** — stop the consumer:
+```bash
+Ctrl+C
+```
+
+**Terminal 1** — stop Kafka:
+```bash
+bash stop_kafka.sh
+```
+
+Close all SSH sessions after that.
+
+---
+
+### Starting Again for a New Session (No Setup Needed)
+
+Setup only runs once. Every future session is just:
+
+**Terminal 1 — Start Kafka:**
+```bash
+ssh aavasar@<VCL_IP>
+cd /share/dsa440s26/aavasar/terminal-copilot
+bash start_kafka.sh
+```
+
+**Terminal 2 — Start Consumer:**
+```bash
+ssh aavasar@<VCL_IP>
+cd /share/dsa440s26/aavasar/terminal-copilot
+python3 consumer.py
+```
+
+**Terminal 3 — Run Tests:**
+```bash
+ssh aavasar@<VCL_IP>
+cd /share/dsa440s26/aavasar/terminal-copilot
+echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
+```
+
+> **If you got a new VCL reservation (new IP or expired VM):** run `bash create_topics.sh` in Terminal 2 once before starting `consumer.py`. The Kafka data directory doesn't persist across reservations.
+
+---
+
+### Pre-Demo Checklist
+
+- [ ] VCL reservation is active and won't expire mid-demo (`vcl.ncsu.edu`)
+- [ ] Terminal 1: `start_kafka.sh` running with no errors
+- [ ] Terminal 2: `consumer.py` showing `Listening on topic 'error_stream'`
+- [ ] Terminal 3: quick test echo returns a fix
+- [ ] If new VM: ran `create_topics.sh` before `consumer.py`
