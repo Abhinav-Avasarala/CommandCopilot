@@ -666,15 +666,20 @@ digest = next(l['digest'] for l in m['layers'] if 'model' in l.get('mediaType','
 print(os.path.expanduser('~/.ollama/models/blobs/' + digest.replace(':', '-')))
 ")
 
-scp "$BLOB_PATH" <unity_id>@<CONSUMER_NODE_IP>:~/phi-2.Q4_K_M.gguf
+scp "$BLOB_PATH" <unity_id>@<CONSUMER_NODE_IP>:/share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf
 ```
 
 You'll be prompted for your Unity password and Duo 2FA.
 
+> **Why `/share/` and not `~`?**
+> NCSU HPC home directories have a **15 GB / 10K file quota** — a 1.6 GB model would consume
+> over 10% of your entire home quota. `/share/dsa440s26` has 20 TB of scratch space and is
+> the documented location for large data files. This is also where Kafka already lives.
+
 Verify it arrived on VCL:
 ```bash
 # On VCL (consumer node):
-ls -lh ~/phi-2.Q4_K_M.gguf
+ls -lh /share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf
 # Expected: ~1.6G
 ```
 
@@ -767,7 +772,7 @@ isn't installed, the system works exactly as before, returning the default "no f
 Run Step 4 above, then restart `consumer.py`.
 
 #### Consumer log shows `[LLM] Model file not found`
-Run Step 3 above (scp the `.gguf` file to `~/phi-2.Q4_K_M.gguf`).
+Run Step 3 above (scp the `.gguf` file to `/share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf`).
 
 #### First inference takes >30 seconds
 Normal on 4 CPU cores with a cold start. Subsequent calls in the same session are ~5s.
@@ -786,5 +791,5 @@ more rules to `rules.py` for patterns you see frequently.
 - [ ] Terminal 2: `consumer.py` showing `Listening on topic 'error_stream'`
 - [ ] Terminal 3: quick test echo returns a fix
 - [ ] If new VM: ran `create_topics.sh` before `consumer.py`
-- [ ] (LLM) `~/phi-2.Q4_K_M.gguf` exists on the consumer node (`ls -lh ~/phi-2.Q4_K_M.gguf`)
+- [ ] (LLM) Model exists on consumer node (`ls -lh /share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf`)
 - [ ] (LLM) `python3 -c "import llama_cpp; print('OK')"` prints OK on consumer node

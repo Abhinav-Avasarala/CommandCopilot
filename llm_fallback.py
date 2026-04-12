@@ -19,7 +19,10 @@ import logging
 log = logging.getLogger(__name__)
 
 # ── Model config ───────────────────────────────────────────────────────────────
-MODEL_PATH = os.path.expanduser("~/phi-2.Q4_K_M.gguf")
+# Stored in /share (scratch space), NOT ~ (home directory).
+# NCSU HPC home dir quota is only 15 GB / 10K files — too small for a 1.6 GB model.
+# /share/dsa440s26 has 20 TB and is the correct place for large data files.
+MODEL_PATH = "/share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf"
 N_THREADS   = 4    # match the 4 CPU cores on the VCL machine
 N_CTX       = 512  # small context window — faster inference, enough for error text
 MAX_TOKENS  = 80   # fix suggestions are short; stop generating early
