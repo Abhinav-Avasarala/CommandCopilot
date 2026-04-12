@@ -1,6 +1,8 @@
 # Terminal Error Copilot — VCL Setup & Testing Guide
 ## (NCSU VCL Reservation: dsa440s26Group2)
 
+> **Multi-node?** Jump to [Part 7: Multi-Node Setup (3 separate VCL machines)](#part-7-multi-node-setup-3-separate-vcl-machines).
+
 ---
 
 ## VCL vs HPC — What's Different
@@ -365,6 +367,153 @@ bash setup.sh
 Your work is lost if you didn't save. For future sessions:
 - Push code to GitHub before the reservation ends
 - Your Kafka data in `/share/dsa440s26/aavasar/kafka-data/` will be gone — just re-run `create_topics.sh` next session
+
+---
+
+## Part 7: Multi-Node Setup (3 separate VCL machines)
+
+This section replaces the single-machine setup when each role (broker, consumer, producer) runs on its own VCL node.
+
+### Architecture
+
+```
+Node 1 (Broker)          Node 2 (Consumer)         Node 3 (Producer)
+─────────────────         ─────────────────          ─────────────────
+start_kafka.sh            export KAFKA_BROKER=...    export KAFKA_BROKER=...
+                          python3 consumer.py        echo "error" | python3 fixit.py
+```
+
+---
+
+### Step 1 — Get all 3 node IPs
+
+Each person reserves their own VCL machine at `vcl.ncsu.edu`. Get the IP for each:
+- **Node 1 IP** (Broker): e.g. `152.14.10.1`
+- **Node 2 IP** (Consumer): e.g. `152.14.10.2`
+- **Node 3 IP** (Producer): e.g. `152.14.10.3`
+
+The only IP all nodes need to know is **Node 1's IP** (the broker).
+
+---
+
+### Step 2 — Set up all 3 nodes
+
+Run `setup.sh` on **each node independently** (each person does this on their own machine):
+```bash
+cd /share/dsa440s26/aavasar/terminal-copilot
+bash setup.sh
+```
+
+---
+
+### Step 3 — Start Kafka on Node 1 (Broker)
+
+SSH into Node 1, then:
+```bash
+cd /share/dsa440s26/aavasar/terminal-copilot
+bash start_kafka.sh
+```
+
+The script will:
+1. Auto-detect its own IP (`hostname -I`)
+2. Configure Kafka to advertise that IP (not `localhost`) so remote nodes can reach it
+3. Open port 9092 in the firewall
+4. Print the address to share with teammates:
+   ```
+   >>> Share this with your teammates: 152.14.10.1:9092 <<<
+   ```
+
+> **If `hostname -I` returns nothing or a wrong IP**, set it manually:
+> ```bash
+> export KAFKA_BROKER_IP=152.14.10.1   # Node 1's actual IP
+> ```
+> Then re-run `start_kafka.sh` (the script uses `KAFKA_BROKER_IP` if set).
+
+---
+
+### Step 4 — Create topics from Node 1
+
+Still on Node 1 (topics only need to be created once, from the broker node):
+```bash
+bash create_topics.sh
+```
+
+---
+
+### Step 5 — Start consumer on Node 2
+
+SSH into Node 2, then tell it where the broker is before running:
+```bash
+cd /share/dsa440s26/aavasar/terminal-copilot
+export KAFKA_BROKER=152.14.10.1:9092    # ← Node 1's IP
+python3 consumer.py
+```
+
+Expected output:
+```
+10:32:01  [CONSUMER]  Connecting to Kafka broker at 152.14.10.1:9092 ...
+10:32:01  [CONSUMER]  Connected. Listening on topic 'error_stream' ...
+```
+
+---
+
+### Step 6 — Run fixit on Node 3 (Producer)
+
+SSH into Node 3, then:
+```bash
+cd /share/dsa440s26/aavasar/terminal-copilot
+export KAFKA_BROKER=152.14.10.1:9092    # ← Node 1's IP
+echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
+```
+
+Expected output:
+```
+Analyzing error...
+
+  Error Type : ModuleNotFoundError
+  Fix        : pip install pandas
+
+```
+
+---
+
+### Multi-Node Troubleshooting
+
+#### "No brokers available" on Node 2 or Node 3
+The producer/consumer can't reach the broker. Check in order:
+1. Is `start_kafka.sh` still running on Node 1?
+2. Is `KAFKA_BROKER` set to Node 1's IP (not `localhost`)?
+   ```bash
+   echo $KAFKA_BROKER    # should print 152.14.10.1:9092
+   ```
+3. Can you reach Node 1's port 9092?
+   ```bash
+   nc -zv 152.14.10.1 9092    # should print "succeeded"
+   ```
+4. Is the firewall open on Node 1?
+   ```bash
+   # On Node 1:
+   sudo ufw allow 9092/tcp
+   sudo ufw status
+   ```
+
+#### Consumer connects but fixit.py times out
+The broker connected but consumer.py isn't running, or it's connected to a different broker address. Verify both Node 2 and Node 3 are using the same `KAFKA_BROKER` value.
+
+#### `nc` says "Connection refused" even with firewall open
+VCL sometimes blocks inter-node traffic at the network level. Check that both reservations are in the same VCL group, or contact your instructor.
+
+---
+
+### Multi-Node Quick Reference
+
+| Step | Node | Command |
+|------|------|---------|
+| Setup (once per node) | all 3 | `bash setup.sh` |
+| Start broker | Node 1 | `bash start_kafka.sh` |
+| Create topics (once) | Node 1 | `bash create_topics.sh` |
+| Start consumer | Node 2 | `export KAFKA_BROKER=<Node1_IP>:9092 && python3 consumer.py` |
+| Run producer test | Node 3 | `export KAFKA_BROKER=<Node1_IP>:9092 && echo "error..." \| python3 fixit.py` |
 
 ---
 

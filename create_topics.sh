@@ -10,7 +10,9 @@
 # Run this ONCE after starting Kafka.
 
 KAFKA_DIR="$HOME/kafka_2.13-3.7.0"
-BROKER="localhost:9092"
+# For multi-node: set KAFKA_BROKER env var to the broker node's IP before running.
+#   export KAFKA_BROKER=152.14.xx.xx:9092
+BROKER="${KAFKA_BROKER:-localhost:9092}"
 
 echo "Creating topic: error_stream"
 $KAFKA_DIR/bin/kafka-topics.sh \

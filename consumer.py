@@ -13,6 +13,7 @@ Usage: python consumer.py
 
 import json
 import logging
+import os
 import sys
 from kafka import KafkaConsumer, KafkaProducer
 from kafka.errors import NoBrokersAvailable
@@ -27,7 +28,10 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Kafka config ───────────────────────────────────────────────────────────────
-BOOTSTRAP_SERVERS = 'localhost:9092'   # Kafka broker address (same machine = localhost)
+# For multi-node setups: set the KAFKA_BROKER env var to the broker node's IP.
+#   export KAFKA_BROKER=152.14.xx.xx:9092
+# If not set, defaults to localhost:9092 (single-machine mode).
+BOOTSTRAP_SERVERS = os.environ.get('KAFKA_BROKER', 'localhost:9092')
 INPUT_TOPIC  = 'error_stream'          # Topic we READ from  (errors come in here)
 OUTPUT_TOPIC = 'fix_stream'            # Topic we WRITE to   (fixes go out here)
 

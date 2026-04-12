@@ -19,6 +19,7 @@ Examples:
 
 import sys
 import json
+import os
 import uuid
 import time
 
@@ -26,7 +27,10 @@ from kafka import KafkaProducer, KafkaConsumer
 from kafka.errors import NoBrokersAvailable
 
 # ── Kafka config ───────────────────────────────────────────────────────────────
-BOOTSTRAP_SERVERS = 'localhost:9092'
+# For multi-node setups: set the KAFKA_BROKER env var to the broker node's IP.
+#   export KAFKA_BROKER=152.14.xx.xx:9092
+# If not set, defaults to localhost:9092 (single-machine mode).
+BOOTSTRAP_SERVERS = os.environ.get('KAFKA_BROKER', 'localhost:9092')
 INPUT_TOPIC       = 'error_stream'    # We PRODUCE to this (send the error)
 OUTPUT_TOPIC      = 'fix_stream'      # We CONSUME from this (receive the fix)
 TIMEOUT_SECONDS   = 30                # How long to wait for a response
