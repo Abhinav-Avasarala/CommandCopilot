@@ -162,12 +162,11 @@ You need a personal environment stored in `/share` where you have write access.
 This environment is created once and shared across all 3 nodes via the GPFS filesystem.
 
 ```bash
-# Create the env in the GROUP directory — not aavasar's personal subdirectory.
-# /share/dsa440s26/ is accessible by all group members; /share/dsa440s26/aavasar/ is not.
-conda create -p /share/dsa440s26/shared-env python=3.10 -y
+# Create the env in /share (20 TB scratch — not home, which has a 15 GB quota)
+conda create -p /share/dsa440s26/aavasar/my-env python=3.10 -y
 
 # Activate it
-conda activate /share/dsa440s26/shared-env
+conda activate /share/dsa440s26/aavasar/my-env
 
 # Install build tools (needed to compile llama-cpp-python)
 conda install -c conda-forge cmake make gxx_linux-64 -y
@@ -179,23 +178,14 @@ pip install kafka-python
 CMAKE_ARGS="-DLLAMA_OPENMP=OFF" pip install llama-cpp-python
 ```
 
-Make the env readable by all group members:
-```bash
-chmod -R g+rx /share/dsa440s26/shared-env
-```
-
 Verify everything installed:
 ```bash
 python3 -c "from kafka import KafkaConsumer; print('kafka-python OK')"
 python3 -c "import llama_cpp; print('llama-cpp-python OK')"
 ```
 
-> **This step only needs to be done once by one person.** All teammates activate the
-> same env from their own nodes — no per-person install needed.
-
-> **Why `/share/dsa440s26/` not `/share/dsa440s26/aavasar/`?**
-> The `aavasar` subdirectory is owned by that user — teammates on other nodes can't
-> read it. The group root `/share/dsa440s26/` is accessible by everyone in the group.
+> **This step only needs to be done once.** Any teammate can activate the same env from
+> their own VCL node since `/share/dsa440s26/aavasar/` is a shared GPFS filesystem.
 
 > **If `conda create` is slow**, it's downloading packages. Let it run — it only happens once.
 
@@ -247,7 +237,7 @@ fix_stream
 
 Now activate the conda environment and start the consumer worker:
 ```bash
-conda activate /share/dsa440s26/shared-env
+conda activate /share/dsa440s26/aavasar/my-env
 python3 consumer.py
 ```
 
@@ -267,7 +257,7 @@ Expected output:
 
 ```bash
 cd /share/dsa440s26/aavasar/terminal-copilot
-conda activate /share/dsa440s26/shared-env
+conda activate /share/dsa440s26/aavasar/my-env
 ```
 
 ---
@@ -392,7 +382,7 @@ Should return `error_stream` and `fix_stream`.
 ### kafka-python not found
 You're not in the conda environment. Activate it first:
 ```bash
-conda activate /share/dsa440s26/shared-env
+conda activate /share/dsa440s26/aavasar/my-env
 python3 consumer.py   # or fixit.py
 ```
 
@@ -433,7 +423,7 @@ start_kafka.sh            conda activate my-env          conda activate my-env
                           python3 consumer.py            echo "error" | python3 fixit.py
 ```
 
-The conda environment at `/share/dsa440s26/shared-env` is on a shared GPFS filesystem —
+The conda environment at `/share/dsa440s26/aavasar/my-env` is on a shared GPFS filesystem —
 all 3 nodes can activate it without any per-node install.
 
 ---
@@ -458,7 +448,7 @@ bash setup.sh
 ```
 
 Python packages do **not** need to be installed per-node. The shared conda env at
-`/share/dsa440s26/shared-env` is accessible from all nodes. If you haven't
+`/share/dsa440s26/aavasar/my-env` is accessible from all nodes. If you haven't
 created it yet, do it once from any node — see Part 2, Step 5.
 
 ---
@@ -502,7 +492,7 @@ bash create_topics.sh
 SSH into Node 2, then activate the conda env and tell it where the broker is:
 ```bash
 cd /share/dsa440s26/aavasar/terminal-copilot
-conda activate /share/dsa440s26/shared-env
+conda activate /share/dsa440s26/aavasar/my-env
 export KAFKA_BROKER=152.14.10.1:9092    # ← Node 1's IP
 python3 consumer.py
 ```
@@ -520,7 +510,7 @@ Expected output:
 SSH into Node 3, then:
 ```bash
 cd /share/dsa440s26/aavasar/terminal-copilot
-conda activate /share/dsa440s26/shared-env
+conda activate /share/dsa440s26/aavasar/my-env
 export KAFKA_BROKER=152.14.10.1:9092    # ← Node 1's IP
 echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
 ```
@@ -584,8 +574,8 @@ VCL sometimes blocks inter-node traffic at the network level. Check that both re
 | Download Kafka (on laptop) | `curl -L -O https://archive.apache.org/dist/kafka/3.7.0/kafka_2.13-3.7.0.tgz` | laptop |
 | Copy Kafka to VCL | `scp kafka_2.13-3.7.0.tgz <unity_id>@<VCL_IP>:/share/dsa440s26/aavasar/` | laptop |
 | Kafka setup (once) | `bash setup.sh` | T1 (once) |
-| Create conda env (once) | `conda create -p /share/dsa440s26/shared-env python=3.10 -y` | T1 (once) |
-| Activate conda env | `conda activate /share/dsa440s26/shared-env` | T2, T3 |
+| Create conda env (once) | `conda create -p /share/dsa440s26/aavasar/my-env python=3.10 -y` | T1 (once) |
+| Activate conda env | `conda activate /share/dsa440s26/aavasar/my-env` | T2, T3 |
 | Start Kafka | `bash start_kafka.sh` | T1 |
 | Create topics (once) | `bash create_topics.sh` | T2 |
 | Start consumer | `conda activate my-env && python3 consumer.py` | T2 |
@@ -627,7 +617,7 @@ bash start_kafka.sh
 ```bash
 ssh aavasar@<VCL_IP>
 cd /share/dsa440s26/aavasar/terminal-copilot
-conda activate /share/dsa440s26/shared-env
+conda activate /share/dsa440s26/aavasar/my-env
 python3 consumer.py
 ```
 
@@ -635,7 +625,7 @@ python3 consumer.py
 ```bash
 ssh aavasar@<VCL_IP>
 cd /share/dsa440s26/aavasar/terminal-copilot
-conda activate /share/dsa440s26/shared-env
+conda activate /share/dsa440s26/aavasar/my-env
 echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
 ```
 
@@ -727,8 +717,7 @@ digest = next(l['digest'] for l in m['layers'] if 'model' in l.get('mediaType','
 print(os.path.expanduser('~/.ollama/models/blobs/' + digest.replace(':', '-')))
 ")
 
-# Stored in the group directory so all nodes can read it — not in aavasar's personal subdir
-scp "$BLOB_PATH" <unity_id>@<CONSUMER_NODE_IP>:/share/dsa440s26/phi-2.Q4_K_M.gguf
+scp "$BLOB_PATH" <unity_id>@<CONSUMER_NODE_IP>:/share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf
 ```
 
 You'll be prompted for your Unity password and Duo 2FA.
@@ -741,7 +730,7 @@ You'll be prompted for your Unity password and Duo 2FA.
 Verify it arrived on VCL:
 ```bash
 # On VCL (consumer node):
-ls -lh /share/dsa440s26/phi-2.Q4_K_M.gguf
+ls -lh /share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf
 # Expected: ~1.6G
 ```
 
@@ -755,7 +744,7 @@ in Part 2, Step 5. If you followed that step, it's already done.
 If you need to install it manually (e.g. the env exists but llama-cpp-python is missing):
 
 ```bash
-conda activate /share/dsa440s26/shared-env
+conda activate /share/dsa440s26/aavasar/my-env
 
 # Ensure build tools are present
 conda install -c conda-forge cmake make gxx_linux-64 -y
@@ -837,7 +826,7 @@ isn't installed, the system works exactly as before, returning the default "no f
 Run Step 4 above, then restart `consumer.py`.
 
 #### Consumer log shows `[LLM] Model file not found`
-Run Step 3 above (scp the `.gguf` file to `/share/dsa440s26/phi-2.Q4_K_M.gguf`).
+Run Step 3 above (scp the `.gguf` file to `/share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf`).
 
 #### First inference takes >30 seconds
 Normal on 4 CPU cores with a cold start. Subsequent calls in the same session are ~5s.
@@ -856,5 +845,5 @@ more rules to `rules.py` for patterns you see frequently.
 - [ ] Terminal 2: `consumer.py` showing `Listening on topic 'error_stream'`
 - [ ] Terminal 3: quick test echo returns a fix
 - [ ] If new VM: ran `create_topics.sh` before `consumer.py`
-- [ ] (LLM) Model exists on consumer node (`ls -lh /share/dsa440s26/phi-2.Q4_K_M.gguf`)
+- [ ] (LLM) Model exists on consumer node (`ls -lh /share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf`)
 - [ ] (LLM) `python3 -c "import llama_cpp; print('OK')"` prints OK on consumer node
