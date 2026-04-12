@@ -79,10 +79,15 @@ For an error not covered by the regex rules, the LLM takes over:
 
 ## Setup Instructions
 
-Full instructions are in the repo — pick the one that matches your environment:
+Pick the guide that matches your environment:
 
-- **[INSTRUCTIONS_VCL.md](INSTRUCTIONS_VCL.md)** — NCSU VCL reservations (single-node and multi-node). Covers conda environment setup, Kafka install, LLM model download, and the 3-node distributed setup.
-- **[INSTRUCTIONS.md](INSTRUCTIONS.md)** — NCSU Henry2 HPC cluster with LSF scheduler (`bsub`).
+| Environment | Guide |
+|-------------|-------|
+| Local laptop or multiple laptops as nodes | [INSTRUCTIONS.md](INSTRUCTIONS.md) |
+| NCSU Henry2 HPC (login → compute node, LSF) | [INSTRUCTIONS_HPC.md](INSTRUCTIONS_HPC.md) |
+| NCSU VCL reservation (single or multi-node) | [INSTRUCTIONS_VCL.md](INSTRUCTIONS_VCL.md) |
+
+All three guides cover single-node and multi-node configurations, the conda environment setup, and the LLM model transfer.
 
 ---
 

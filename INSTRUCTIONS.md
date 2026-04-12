@@ -1,173 +1,103 @@
-# Terminal Error Copilot — HPC Setup & Testing Guide
-## (NCSU Henry2, LSF scheduler)
+# Terminal Error Copilot — Local Setup Guide
+## (Single laptop or multiple laptops as nodes)
 
 ---
 
-## How the System Works (Read This First)
+## Which guide is right for you?
 
-```
-Terminal 1                Terminal 2                Terminal 3 (your work)
-──────────────────────────────────────────────────────────────────────────
-Kafka broker              consumer.py               fixit.py
-(ZooKeeper +              (backend worker)          (CLI tool)
- Kafka server)
-      │                         │                         │
-      │   ←── listens ──────────┤                         │
-      │                         │                         │
-      │   ←── error arrives ────────────────── produces ──┤
-      │         (error_stream topic)                       │
-      │                         │                         │
-      │   ── fix produced ─────►│                         │
-      │         (fix_stream topic)                         │
-      │                                                    │
-      │   ── fix received ─────────────────── consumed ──►│
-                                                           │
-                                               prints fix to screen
-```
-
-**Kafka Topics:**
-- `error_stream` — fixit.py writes here, consumer.py reads from here
-- `fix_stream` — consumer.py writes here, fixit.py reads from here
+| Environment | Guide |
+|-------------|-------|
+| Your laptop (or multiple laptops) | **This file** |
+| NCSU Henry2 HPC (login → compute node) | [INSTRUCTIONS_HPC.md](INSTRUCTIONS_HPC.md) |
+| NCSU VCL reservation | [INSTRUCTIONS_VCL.md](INSTRUCTIONS_VCL.md) |
 
 ---
 
-## Part 1: First-Time Setup (do this ONCE)
+## Prerequisites
 
-### Step 1 — SSH into HPC
+Install these before starting:
 
 ```bash
-ssh <unity_id>@login.hpc.ncsu.edu
+# Java (required by Kafka)
+java -version    # if this works, you're good
+# Mac: brew install openjdk
+# Ubuntu/Debian: sudo apt install -y default-jdk
+
+# Python 3.8+
+python3 --version
+
+# pip packages
+pip3 install kafka-python
+pip3 install llama-cpp-python    # for LLM fallback (optional — see Part 4)
 ```
 
 ---
 
-### Step 2 — Get an Interactive Compute Node (LSF)
-
-You need a real compute node (not the login node) to run Kafka.
+## Part 1: Download and Configure Kafka
 
 ```bash
-bsub -Is -n 4 -W 2:00 -R "rusage[mem=4GB]" bash
+# Download Kafka
+curl -L -O https://archive.apache.org/dist/kafka/3.7.0/kafka_2.13-3.7.0.tgz
+tar -xzf kafka_2.13-3.7.0.tgz
+mv kafka_2.13-3.7.0 ~/kafka_2.13-3.7.0
+rm kafka_2.13-3.7.0.tgz
+
+# Configure data directories
+mkdir -p ~/kafka-data/zookeeper ~/kafka-data/kafka-logs
+sed -i "" "s|dataDir=.*|dataDir=$HOME/kafka-data/zookeeper|" \
+    ~/kafka_2.13-3.7.0/config/zookeeper.properties
+sed -i "" "s|log.dirs=.*|log.dirs=$HOME/kafka-data/kafka-logs|" \
+    ~/kafka_2.13-3.7.0/config/server.properties
 ```
 
-**What this means:**
-- `-Is` — interactive session (gives you a shell on the node)
-- `-n 4` — request 4 CPU cores (Kafka + ZooKeeper need breathing room)
-- `-W 2:00` — 2 hour time limit
-- `-R "rusage[mem=4GB]"` — request 4 GB memory
-
-After this runs, your prompt changes to show the compute node name (e.g., `[you@c0123]`).
-**Write down that node name — you'll need it when opening more terminals.**
+> **Linux:** use `sed -i` (no empty string after `-i`)
 
 ---
 
-### Step 3 — Clone the project and run setup
+## Part 2: Running the System (Single Machine)
 
-```bash
-cd ~
-git clone <your-repo-url> terminal-copilot
-cd terminal-copilot
-bash setup.sh
-```
-
-`setup.sh` does four things automatically:
-1. Loads the Java module (Kafka requires Java)
-2. Downloads Kafka 3.7.0 to your home directory
-3. Configures Kafka to store data in `~/kafka-data/` (not /tmp)
-4. Installs the `kafka-python` pip package
-
----
-
-## Part 2: Every Time You Want to Run It
-
-You need **3 terminal windows** all connected to the **same compute node**.
-
-### How to open multiple terminals to the same node:
-
-When you `bsub -Is`, you land on a node, e.g., `c0123`.
-Open new terminal tabs and SSH directly to that node:
-
-```bash
-# In terminal 2 and 3:
-ssh <unity_id>@login.hpc.ncsu.edu
-ssh c0123       # replace with your actual node name
-```
-
----
+Open 3 terminal windows.
 
 ### Terminal 1 — Start Kafka
 
 ```bash
-cd ~/terminal-copilot
-module load java    # must do this in every new terminal
 bash start_kafka.sh
-```
-
-You should see output like:
-```
-Starting ZooKeeper...
-ZooKeeper PID: 12345
-Starting Kafka broker...
-Kafka broker PID: 12346
-Kafka is running on localhost:9092
-```
-
-**Leave this terminal open. Do not close it.**
-
----
-
-### Terminal 2 — Create Topics (first time only) + Start Consumer
-
-```bash
-cd ~/terminal-copilot
-module load java
-
-# Only needed the very first time:
-bash create_topics.sh
 ```
 
 Expected output:
 ```
-Creating topic: error_stream
-Created topic error_stream.
-Creating topic: fix_stream
-Created topic fix_stream.
-
-Done. Verifying topics exist:
-error_stream
-fix_stream
+Kafka is running on localhost:9092
 ```
 
-Now start the consumer worker:
-```bash
-python consumer.py
-```
-
-You should see:
-```
-10:32:01  [CONSUMER]  Connecting to Kafka broker at localhost:9092 ...
-10:32:01  [CONSUMER]  Connected. Listening on topic 'error_stream' ...
-10:32:01  [CONSUMER]  Fixes will be sent to topic 'fix_stream'
-10:32:01  [CONSUMER]  ──────────────────────────────────────────────────
-```
-
-**Leave this terminal open. The consumer waits for errors.**
+**Leave this terminal open.**
 
 ---
 
-### Terminal 3 — Run Your Tests
+### Terminal 2 — Create Topics + Start Consumer
 
+**First time only:**
 ```bash
-cd ~/terminal-copilot
+bash create_topics.sh
 ```
+
+Then start the worker:
+```bash
+python3 consumer.py
+```
+
+Expected output:
+```
+[CONSUMER]  Connected. Listening on topic 'error_stream' ...
+```
+
+**Leave this terminal open.**
 
 ---
 
-## Part 3: Testing
-
-### Test 1 — Python missing module
+### Terminal 3 — Test It
 
 ```bash
-echo "ModuleNotFoundError: No module named 'pandas'" | python fixit.py
+echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
 ```
 
 Expected output:
@@ -176,143 +106,130 @@ Analyzing error...
 
   Error Type : ModuleNotFoundError
   Fix        : pip install pandas
-
 ```
 
 ---
 
-### Test 2 — Node.js missing module
+## Part 3: Multi-Machine Setup (Multiple Laptops as Nodes)
+
+Each laptop takes one role. The only thing that changes from the single-machine setup
+is that the broker's IP address must be shared with the other machines.
+
+### Machine 1 — Broker
+
+Run `start_kafka.sh` as normal. It will print:
+```
+>>> Share this with your teammates: 192.168.x.x:9092 <<<
+```
+
+Share that IP with everyone.
+
+---
+
+### Machine 2 — Consumer/Worker
 
 ```bash
-echo "Error: Cannot find module 'express'" | python fixit.py
-```
-
-Expected output:
-```
-Analyzing error...
-
-  Error Type : UnknownError
-  Fix        : npm install express
-
+export KAFKA_BROKER=192.168.x.x:9092   # ← Machine 1's IP
+python3 consumer.py
 ```
 
 ---
 
-### Test 3 — Port in use
+### Machine 3 — Producer
 
 ```bash
-echo "Error: listen EADDRINUSE :::3000" | python fixit.py
+export KAFKA_BROKER=192.168.x.x:9092   # ← Machine 1's IP
+echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
 ```
 
-Expected output:
-```
-Analyzing error...
-
-  Error Type : EADDRINUSE
-  Fix        : Port 3000 is already in use — run: lsof -ti:3000 | xargs kill
-
-```
+> **Firewall:** Make sure port `9092` is open on Machine 1.
+> Mac: System Settings → Firewall → allow incoming on 9092.
+> Linux: `sudo ufw allow 9092/tcp`
 
 ---
 
-### Test 4 — A real Python crash
+## Part 4: LLM Fallback Setup (Optional)
 
-Create a broken script and pipe its error:
+When no regex rule matches, the system falls back to a local Phi-2 model (~1.6 GB).
+This only needs to be set up on the **consumer/worker machine**.
+
+### Step 1 — Download the model
+
+**Via Ollama (if installed):**
+```bash
+ollama pull phi
+
+# Find and copy the blob to the expected path
+BLOB=$(python3 -c "
+import json, os
+m = json.load(open(os.path.expanduser(
+    '~/.ollama/models/manifests/registry.ollama.ai/library/phi/latest')))
+d = next(l['digest'] for l in m['layers'] if 'model' in l.get('mediaType',''))
+print(os.path.expanduser('~/.ollama/models/blobs/' + d.replace(':', '-')))
+")
+cp "$BLOB" ~/phi-2.Q4_K_M.gguf
+```
+
+**Via curl:**
+```bash
+curl -L -o ~/phi-2.Q4_K_M.gguf \
+  "https://huggingface.co/TheBloke/phi-2-GGUF/resolve/main/phi-2.Q4_K_M.gguf"
+```
+
+### Step 2 — Update the model path
+
+Open `llm_fallback.py` and change `MODEL_PATH` to:
+```python
+MODEL_PATH = os.path.expanduser("~/phi-2.Q4_K_M.gguf")
+```
+
+### Step 3 — Verify
 
 ```bash
-echo "import pandas" > broken.py
-python broken.py 2>&1 | python fixit.py
+python3 -c "import llama_cpp; print('OK')"
+ls -lh ~/phi-2.Q4_K_M.gguf
+```
+
+Then restart `consumer.py`. On the first unmatched error, you'll see:
+```
+[LLM] Loading Phi-2 model ... (takes ~10s first time)
 ```
 
 ---
 
-### Test 5 — An unrecognized error (fallback message)
+## Troubleshooting
 
-```bash
-echo "Something went horribly wrong with the flux capacitor" | python fixit.py
-```
+### "No brokers available"
+Kafka isn't running. Start it in Terminal 1: `bash start_kafka.sh`
 
-Expected output:
-```
-Analyzing error...
+### "Timed out. Is consumer.py still running?"
+Consumer crashed or isn't started. Restart it in Terminal 2.
 
-  Error Type : UnknownError
-  Fix        : No known fix found. Try searching the exact error message on Stack Overflow or the project's GitHub issues.
-
-```
-
----
-
-### What You Should See in Terminal 2 (consumer) During Tests
-
-Every time you pipe an error, the consumer logs the activity:
-
-```
-10:35:14  [CONSUMER]  New error received  (id=abc-123-...)
-10:35:14  [CONSUMER]    Error preview: ModuleNotFoundError: No module named 'pandas'
-10:35:14  [CONSUMER]    Fix determined: pip install pandas
-10:35:14  [CONSUMER]    Response sent to 'fix_stream'
-10:35:14  [CONSUMER]  ──────────────────────────────────────────────────
-```
-
-This confirms the full Kafka flow worked:
-- fixit.py → `error_stream` → consumer.py → `fix_stream` → fixit.py
-
----
-
-## Part 4: Troubleshooting
-
-### "No brokers available" error
-Kafka isn't running. Go to Terminal 1 and run `bash start_kafka.sh`.
-
-### "Is consumer.py still running?" message
-The consumer crashed or isn't started. Go to Terminal 2 and run `python consumer.py`.
-
-### Topics don't exist error
+### Topics don't exist
 ```bash
 bash create_topics.sh
 ```
 
-### Java not found
+### Port 9092 already in use
 ```bash
-module avail java      # see what java modules are available
-module load java/17    # load whichever version shows up
+lsof -ti:9092 | xargs kill
 ```
 
-### consumer.py can't find rules.py
-Make sure you're running from inside the project directory:
-```bash
-cd ~/terminal-copilot
-python consumer.py
-```
-
-### Check if Kafka is actually running
+### Check Kafka health
 ```bash
 ~/kafka_2.13-3.7.0/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+# Should return: error_stream, fix_stream
 ```
-If this returns `error_stream` and `fix_stream`, Kafka is healthy.
 
 ---
 
-## Part 5: Shutting Down
+## Quick Reference
 
-When done, in Terminal 1:
-- Press `Ctrl+C` to stop `start_kafka.sh`
-- Then run: `bash stop_kafka.sh`
-
-In Terminal 2:
-- Press `Ctrl+C` to stop `consumer.py`
-
----
-
-## Quick Reference Card
-
-| What | Command | Terminal |
-|------|---------|---------|
-| Get compute node | `bsub -Is -n 4 -W 2:00 -R "rusage[mem=4GB]" bash` | any |
-| Start Kafka | `bash start_kafka.sh` | T1 |
-| Create topics (once) | `bash create_topics.sh` | T2 |
-| Start consumer | `python consumer.py` | T2 |
-| Test | `echo "error text" \| python fixit.py` | T3 |
-| Real test | `python broken.py 2>&1 \| python fixit.py` | T3 |
-| Stop everything | `bash stop_kafka.sh` + Ctrl+C | T1, T2 |
+| What | Command |
+|------|---------|
+| Start Kafka | `bash start_kafka.sh` |
+| Create topics (once) | `bash create_topics.sh` |
+| Start consumer | `python3 consumer.py` |
+| Run test | `echo "error" \| python3 fixit.py` |
+| Stop Kafka | `bash stop_kafka.sh` + Ctrl+C in consumer terminal |
+| Multi-machine broker | `export KAFKA_BROKER=<IP>:9092` on consumer + producer |
