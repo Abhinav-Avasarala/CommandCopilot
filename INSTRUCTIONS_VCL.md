@@ -92,7 +92,7 @@ java -version    # should now show version info
 ### Step 2 — Clone the Project
 
 ```bash
-cd ~
+cd /share/dsa44026/aavasar
 git clone <your-repo-url> terminal-copilot
 cd terminal-copilot
 ```
@@ -106,8 +106,8 @@ bash setup.sh
 ```
 
 This will:
-- Download Kafka 3.7.0 to your home directory
-- Configure it to store data in `~/kafka-data/`
+- Download Kafka 3.7.0 to `/share/dsa44026/aavasar/`
+- Configure it to store data in `/share/dsa44026/aavasar/kafka-data/`
 - Install the `kafka-python` pip package
 
 If the script prompts about Java module and fails, that's fine — you already installed Java via `apt` above. The rest of the script will still run.
@@ -116,11 +116,11 @@ If the script prompts about Java module and fails, that's fine — you already i
 > In that case, download Kafka on your laptop and `scp` it over:
 > ```bash
 > # Run this on your laptop (not on VCL):
-> scp kafka_2.13-3.7.0.tgz <unity_id>@152.14.xx.xx:~/
+> scp kafka_2.13-3.7.0.tgz <unity_id>@152.14.xx.xx:/share/dsa44026/aavasar/
 > ```
 > Then on VCL:
 > ```bash
-> cd ~
+> cd /share/dsa44026/aavasar
 > tar -xzf kafka_2.13-3.7.0.tgz
 > ```
 
@@ -133,7 +133,7 @@ You need all 3 terminals open and SSH'd into the VCL machine.
 ### Terminal 1 — Start Kafka
 
 ```bash
-cd ~/terminal-copilot
+cd /share/dsa44026/aavasar/terminal-copilot
 bash start_kafka.sh
 ```
 
@@ -154,7 +154,7 @@ Kafka is running on localhost:9092
 
 **First time only** — create the topics:
 ```bash
-cd ~/terminal-copilot
+cd /share/dsa44026/aavasar/terminal-copilot
 bash create_topics.sh
 ```
 
@@ -190,7 +190,7 @@ Expected output:
 ### Terminal 3 — Test It
 
 ```bash
-cd ~/terminal-copilot
+cd /share/dsa44026/aavasar/terminal-copilot
 ```
 
 ---
@@ -308,7 +308,7 @@ bash create_topics.sh
 
 ### Check if Kafka is healthy
 ```bash
-~/kafka_2.13-3.7.0/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+/share/dsa44026/aavasar/kafka_2.13-3.7.0/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
 ```
 Should return `error_stream` and `fix_stream`.
 
@@ -322,7 +322,7 @@ pip3 install --user kafka-python
 ### VCL reservation expired mid-session
 Your work is lost if you didn't save. For future sessions:
 - Push code to GitHub before the reservation ends
-- Your Kafka data in `~/kafka-data/` will be gone — just re-run `create_topics.sh` next session
+- Your Kafka data in `/share/dsa44026/aavasar/kafka-data/` will be gone — just re-run `create_topics.sh` next session
 
 ---
 
