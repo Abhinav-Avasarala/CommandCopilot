@@ -12,8 +12,8 @@
 | Job scheduling | LSF (`bsub`) required | **Not needed — you own the machine** |
 | Compute nodes | Must request one | **Already on one** |
 | Multiple terminals | Must SSH to specific node | **Just SSH to the same IP each time** |
-| Sudo/admin access | No | **Yes** |
-| Java install | `module load java` | `sudo apt install` (if needed) |
+| Sudo/admin access | No | **No** (system-wide conda is read-only) |
+| Java install | `module load java` | `module load java` (same) |
 
 **Bottom line: VCL is simpler. You skip all the `bsub` stuff.**
 
@@ -125,7 +125,7 @@ You will be prompted for your Unity password and Duo two-factor authentication.
 
 ---
 
-### Step 4 — Run Setup Script
+### Step 4 — Run Setup Script (Kafka only)
 
 ```bash
 cd /share/dsa440s26/aavasar/terminal-copilot
@@ -133,24 +133,61 @@ bash setup.sh
 ```
 
 This will:
-- Copy Kafka 3.7.0 from `/share/dsa440s26/aavasar/` (no internet needed)
-- Extract and configure it to store data in `~/kafka-data/`
-- Install the `kafka-python` pip package
+- Load Java (required by Kafka)
+- Copy Kafka 3.7.0 from `/share/dsa440s26/aavasar/` into your home directory
+- Configure Kafka to store data in `~/kafka-data/`
 
-**What the script does NOT do anymore:** download Kafka via `wget` — this was replaced with a local `cp` because VCL has no internet access.
+**What `setup.sh` does NOT do:** install Python packages. Those go into the shared
+conda environment created in Step 5 below.
 
 Expected output when successful:
 ```
-[1/4] Loading Java module...        ← Java loads fine
-[2/4] Copying Kafka 3.7.0...        ← Copies from shared dir
-[3/4] Configuring Kafka...          ← Sets up data directories
-[4/4] Installing Python package...  ← Installs kafka-python
-Setup complete!
+[1/3] Loading Java module...        ← Java loads fine
+[2/3] Copying Kafka 3.7.0...        ← Copies from shared dir
+[3/3] Configuring Kafka...          ← Sets up data directories
+Kafka setup complete!
 ```
 
-> **If the script stops after `[2/4]` with no further output**, the `kafka_2.13-3.7.0.tgz` file is missing from `/share/dsa440s26/aavasar/`. Go back to Step 3 and re-scp it.
+> **If the script stops after `[2/3]` with no output**, `kafka_2.13-3.7.0.tgz` is missing
+> from `/share/dsa440s26/aavasar/`. Go back to Step 3 and re-scp it.
 
-> **Note:** `setup.sh` must be run from inside the `terminal-copilot/` directory, not from `/share/dsa440s26/aavasar/`. Running `bash setup.sh` from the parent directory will give `No such file or directory`.
+> **`setup.sh` must be run from inside `terminal-copilot/`**, not from the parent directory.
+
+---
+
+### Step 5 — Create the Shared Conda Environment
+
+The system-wide `base` conda environment on VCL is read-only (you don't own it).
+You need a personal environment stored in `/share` where you have write access.
+This environment is created once and shared across all 3 nodes via the GPFS filesystem.
+
+```bash
+# Create the env in /share (20 TB scratch — not home, which has a 15 GB quota)
+conda create -p /share/dsa440s26/aavasar/my-env python=3.10 -y
+
+# Activate it
+conda activate /share/dsa440s26/aavasar/my-env
+
+# Install build tools (needed to compile llama-cpp-python)
+conda install -c conda-forge cmake make gxx_linux-64 -y
+
+# Install kafka-python
+pip install kafka-python
+
+# Install llama-cpp-python (CPU-only, OpenMP disabled — compiles in ~3-5 min)
+CMAKE_ARGS="-DLLAMA_OPENMP=OFF" pip install llama-cpp-python
+```
+
+Verify everything installed:
+```bash
+python3 -c "from kafka import KafkaConsumer; print('kafka-python OK')"
+python3 -c "import llama_cpp; print('llama-cpp-python OK')"
+```
+
+> **This step only needs to be done once.** Any teammate can activate the same env from
+> their own VCL node since `/share/dsa440s26/aavasar/` is a shared GPFS filesystem.
+
+> **If `conda create` is slow**, it's downloading packages. Let it run — it only happens once.
 
 ---
 
@@ -198,8 +235,9 @@ error_stream
 fix_stream
 ```
 
-Now start the consumer worker:
+Now activate the conda environment and start the consumer worker:
 ```bash
+conda activate /share/dsa440s26/aavasar/my-env
 python3 consumer.py
 ```
 
@@ -219,6 +257,7 @@ Expected output:
 
 ```bash
 cd /share/dsa440s26/aavasar/terminal-copilot
+conda activate /share/dsa440s26/aavasar/my-env
 ```
 
 ---
@@ -341,13 +380,13 @@ bash create_topics.sh
 Should return `error_stream` and `fix_stream`.
 
 ### kafka-python not found
+You're not in the conda environment. Activate it first:
 ```bash
-pip3 install kafka-python
-# or
-pip3 install --user kafka-python
+conda activate /share/dsa440s26/aavasar/my-env
+python3 consumer.py   # or fixit.py
 ```
 
-### setup.sh stops after [2/4] with no error
+### setup.sh stops after [2/3] with no error
 The Kafka tarball is missing from `/share/dsa440s26/aavasar/`. Download it on your laptop with `curl -L` and `scp` it over. See Part 2, Step 3.
 
 ### curl downloaded only ~196 bytes
@@ -377,11 +416,15 @@ This section replaces the single-machine setup when each role (broker, consumer,
 ### Architecture
 
 ```
-Node 1 (Broker)          Node 2 (Consumer)         Node 3 (Producer)
-─────────────────         ─────────────────          ─────────────────
-start_kafka.sh            export KAFKA_BROKER=...    export KAFKA_BROKER=...
-                          python3 consumer.py        echo "error" | python3 fixit.py
+Node 1 (Broker)          Node 2 (Consumer)              Node 3 (Producer)
+─────────────────         ──────────────────             ─────────────────
+start_kafka.sh            conda activate my-env          conda activate my-env
+                          export KAFKA_BROKER=...        export KAFKA_BROKER=...
+                          python3 consumer.py            echo "error" | python3 fixit.py
 ```
+
+The conda environment at `/share/dsa440s26/aavasar/my-env` is on a shared GPFS filesystem —
+all 3 nodes can activate it without any per-node install.
 
 ---
 
@@ -398,11 +441,15 @@ The only IP all nodes need to know is **Node 1's IP** (the broker).
 
 ### Step 2 — Set up all 3 nodes
 
-Run `setup.sh` on **each node independently** (each person does this on their own machine):
+Run `setup.sh` on **each node** (sets up Kafka/Java — run once per node):
 ```bash
 cd /share/dsa440s26/aavasar/terminal-copilot
 bash setup.sh
 ```
+
+Python packages do **not** need to be installed per-node. The shared conda env at
+`/share/dsa440s26/aavasar/my-env` is accessible from all nodes. If you haven't
+created it yet, do it once from any node — see Part 2, Step 5.
 
 ---
 
@@ -442,9 +489,10 @@ bash create_topics.sh
 
 ### Step 5 — Start consumer on Node 2
 
-SSH into Node 2, then tell it where the broker is before running:
+SSH into Node 2, then activate the conda env and tell it where the broker is:
 ```bash
 cd /share/dsa440s26/aavasar/terminal-copilot
+conda activate /share/dsa440s26/aavasar/my-env
 export KAFKA_BROKER=152.14.10.1:9092    # ← Node 1's IP
 python3 consumer.py
 ```
@@ -462,6 +510,7 @@ Expected output:
 SSH into Node 3, then:
 ```bash
 cd /share/dsa440s26/aavasar/terminal-copilot
+conda activate /share/dsa440s26/aavasar/my-env
 export KAFKA_BROKER=152.14.10.1:9092    # ← Node 1's IP
 echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
 ```
@@ -522,15 +571,15 @@ VCL sometimes blocks inter-node traffic at the network level. Check that both re
 | What | Command | Terminal |
 |------|---------|---------|
 | Connect to VCL | `ssh <unity_id>@<VCL_IP>` | all 3 |
-| Install Java (if needed) | `sudo apt install -y default-jdk` | T1 (once) |
 | Download Kafka (on laptop) | `curl -L -O https://archive.apache.org/dist/kafka/3.7.0/kafka_2.13-3.7.0.tgz` | laptop |
 | Copy Kafka to VCL | `scp kafka_2.13-3.7.0.tgz <unity_id>@<VCL_IP>:/share/dsa440s26/aavasar/` | laptop |
-| One-time setup | `bash setup.sh` | T1 (once) |
+| Kafka setup (once) | `bash setup.sh` | T1 (once) |
+| Create conda env (once) | `conda create -p /share/dsa440s26/aavasar/my-env python=3.10 -y` | T1 (once) |
+| Activate conda env | `conda activate /share/dsa440s26/aavasar/my-env` | T2, T3 |
 | Start Kafka | `bash start_kafka.sh` | T1 |
 | Create topics (once) | `bash create_topics.sh` | T2 |
-| Start consumer | `python3 consumer.py` | T2 |
-| Quick test | `echo "error text" \| python3 fixit.py` | T3 |
-| Real test | `python3 broken.py 2>&1 \| python3 fixit.py` | T3 |
+| Start consumer | `conda activate my-env && python3 consumer.py` | T2 |
+| Quick test | `conda activate my-env && echo "error" \| python3 fixit.py` | T3 |
 | Stop everything | `bash stop_kafka.sh` + Ctrl+C in T2 | T1 |
 
 ---
@@ -568,6 +617,7 @@ bash start_kafka.sh
 ```bash
 ssh aavasar@<VCL_IP>
 cd /share/dsa440s26/aavasar/terminal-copilot
+conda activate /share/dsa440s26/aavasar/my-env
 python3 consumer.py
 ```
 
@@ -575,6 +625,7 @@ python3 consumer.py
 ```bash
 ssh aavasar@<VCL_IP>
 cd /share/dsa440s26/aavasar/terminal-copilot
+conda activate /share/dsa440s26/aavasar/my-env
 echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
 ```
 
@@ -687,28 +738,31 @@ ls -lh /share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf
 
 ### Step 4 — Install llama-cpp-python on VCL
 
-`setup.sh` now handles this automatically (step 5/5). But if you already ran `setup.sh`
-before this feature was added, run the install manually:
+`llama-cpp-python` is installed as part of creating the shared conda environment
+in Part 2, Step 5. If you followed that step, it's already done.
+
+If you need to install it manually (e.g. the env exists but llama-cpp-python is missing):
 
 ```bash
-# On VCL — compiles C++ bindings, takes 2-5 minutes:
-CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS" \
-    pip install --user llama-cpp-python
+conda activate /share/dsa440s26/aavasar/my-env
+
+# Ensure build tools are present
+conda install -c conda-forge cmake make gxx_linux-64 -y
+
+# Install with OpenMP disabled (avoids linker errors on VCL's CPU-only nodes)
+CMAKE_ARGS="-DLLAMA_OPENMP=OFF" pip install llama-cpp-python
 
 # Verify:
 python3 -c "import llama_cpp; print('OK')"
 ```
 
-> **If compile fails with "cmake not found":**
-> ```bash
-> conda install -y cmake
-> # then retry the pip install command above
-> ```
+> **Why `DLLAMA_OPENMP=OFF`?** VCL nodes don't provide libgomp (OpenMP runtime) and
+> you don't have sudo to install it. Disabling OpenMP means inference uses 1 thread
+> instead of 4 — about 2x slower, but it compiles and runs correctly.
 
-> **If it fails with "OpenBLAS not found"** (slower but still works):
-> ```bash
-> pip install --user llama-cpp-python
-> ```
+> **Why not `pip install --user`?** The system-wide `base` conda env is read-only.
+> `--user` installs into `~/.local` which works, but the packages won't be visible
+> when you activate the conda env. Always install inside the activated env.
 
 ---
 
