@@ -777,7 +777,7 @@ python3 consumer.py
 Now send an error that the regex rules don't cover (Terminal 3):
 ```bash
 export KAFKA_BROKER=<broker_IP>:9092   # skip if single-machine
-echo "RuntimeError: CUDA out of memory. Tried to allocate 2.00 GiB" | python3 fixit.py
+echo "Some Error" | python3 fixit.py
 ```
 
 Expected output (fix prefixed with `[LLM]`):
