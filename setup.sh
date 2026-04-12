@@ -55,13 +55,29 @@ sed -i "s|log.dirs=.*|log.dirs=$KAFKA_DATA/kafka-logs|" \
 echo "  Data will be stored in $KAFKA_DATA"
 # ── Step 4: Install Python package ────────────────────────────────────────────
 echo ""
-echo "[4/4] Installing Python package: kafka-python..."
+echo "[4/5] Installing Python package: kafka-python..."
 # Try conda first (common on HPC), fall back to pip --user
 if command -v conda &> /dev/null; then
 conda install -y kafka-python 2>/dev/null || pip install --user kafka-python
 else
 pip install --user kafka-python
 fi
+
+# ── Step 5: Install llama-cpp-python (for LLM fallback) ───────────────────────
+echo ""
+echo "[5/5] Installing llama-cpp-python (LLM fallback — CPU-only)..."
+echo "  This compiles a C++ library. Takes 2-5 minutes. Do not interrupt."
+echo ""
+# CMAKE_ARGS forces CPU-only build (no CUDA/Metal). OpenBLAS speeds up matrix math.
+if command -v conda &> /dev/null; then
+    conda install -y -c conda-forge openblas 2>/dev/null || true
+fi
+CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS" \
+    pip install --user llama-cpp-python 2>&1 | tail -5
+# Verify install
+python3 -c "import llama_cpp; print('  llama-cpp-python installed OK')" 2>/dev/null \
+    || echo "  WARNING: llama-cpp-python install may have failed."
+echo "  (LLM fallback requires the model file too — see INSTRUCTIONS_VCL.md Part 8)"
 echo ""
 echo "========================================"
 echo "  Setup complete!"
@@ -69,6 +85,9 @@ echo ""
 echo "  Next steps:"
 echo "    1. bash start_kafka.sh     (in terminal 1 — keep it open)"
 echo "    2. bash create_topics.sh   (in terminal 2 — run once)"
-echo "    3. python consumer.py      (in terminal 2 — keep it running)"
-echo "    4. Test: echo 'ModuleNotFoundError: No module named pandas' | python fixit.py"
+echo "    3. python3 consumer.py     (in terminal 2 — keep it running)"
+echo "    4. Test: echo 'ModuleNotFoundError: No module named pandas' | python3 fixit.py"
+echo ""
+echo "  For LLM fallback on unknown errors:"
+echo "    See INSTRUCTIONS_VCL.md Part 8 — requires scp of phi-2.Q4_K_M.gguf (~1.6 GB)"
 echo "========================================"

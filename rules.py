@@ -126,11 +126,26 @@ def get_fix(error_text: str) -> str:
     """
     Run error_text through each rule in order.
     Return the fix string from the first matching rule.
+
+    If no regex rule matches, falls back to a local Phi-2 LLM (llm_fallback.py).
+    The LLM is optional — if not installed or model file is missing, returns the
+    default "no fix found" message instead of crashing.
     """
     for pattern, fix_fn in RULES:
         match = re.search(pattern, error_text, re.IGNORECASE)
         if match:
             return fix_fn(match)
+
+    # ── LLM fallback ──────────────────────────────────────────────────────────
+    # Regex found no match. Try the local Phi-2 model before giving up.
+    try:
+        from llm_fallback import get_llm_fix
+        llm_fix = get_llm_fix(error_text)
+        if llm_fix:
+            return f"[LLM] {llm_fix}"
+    except Exception:
+        pass  # LLM unavailable for any reason — fall through gracefully
+
     return "No known fix found. Try searching the exact error message on Stack Overflow or the project's GitHub issues."
 
 

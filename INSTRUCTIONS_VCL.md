@@ -582,6 +582,203 @@ echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
 
 ---
 
+---
+
+## Part 8: LLM Fallback Setup (Phi-2 Model)
+
+When an error doesn't match any regex rule, the system now falls back to a local **Phi-2 2.7B** model running on your CPU. This section explains how to get the model onto VCL (no internet on VCL means you scp it from your laptop, same as Kafka).
+
+---
+
+### What you need
+
+| File | Size | Purpose |
+|------|------|---------|
+| `phi-2.Q4_K_M.gguf` | ~1.6 GB | The model weights (4-bit quantized) |
+| `llama-cpp-python` | ~5 MB compiled | Python bindings to run GGUF models on CPU |
+
+---
+
+### Step 1 — Check your Python version on VCL
+
+You need this to download the right wheel. SSH into your VCL node and run:
+```bash
+python3 --version
+# e.g. Python 3.10.14
+```
+Write down the major.minor version (e.g. `3.10`).
+
+---
+
+### Step 2 — Pull the model using Ollama (on your Mac)
+
+Ollama stores every pulled model as a GGUF blob on disk — you just locate that file
+and `scp` it directly. No separate download needed if you already have Ollama installed.
+
+```bash
+# On your Mac — pull Phi-2 (Ollama's model name for Phi-2 is "phi"):
+ollama pull phi
+```
+
+This downloads ~1.6 GB. Once it finishes, find the blob file Ollama saved:
+
+```bash
+# Ollama keeps blobs in ~/.ollama/models/blobs/ named by their sha256 hash.
+# This one-liner reads the manifest and prints the exact path:
+python3 -c "
+import json, os
+manifest_path = os.path.expanduser(
+    '~/.ollama/models/manifests/registry.ollama.ai/library/phi/latest'
+)
+m = json.load(open(manifest_path))
+digest = next(
+    l['digest'] for l in m['layers']
+    if 'model' in l.get('mediaType', '')
+)
+print(os.path.expanduser('~/.ollama/models/blobs/' + digest.replace(':', '-')))
+"
+```
+
+Example output:
+```
+/Users/yourname/.ollama/models/blobs/sha256-e8a35b5937a5
+```
+
+Save that path — you'll use it in Step 3.
+
+> **If the python3 one-liner errors**, Ollama changed its manifest location. Fall back to
+> finding the largest blob manually (it's the model weights):
+> ```bash
+> ls -lhS ~/.ollama/models/blobs/ | head -3
+> ```
+
+---
+
+### Step 3 — Copy the model to VCL
+
+```bash
+# On your Mac — substitute the blob path from Step 2:
+BLOB_PATH=$(python3 -c "
+import json, os
+m = json.load(open(os.path.expanduser(
+    '~/.ollama/models/manifests/registry.ollama.ai/library/phi/latest')))
+digest = next(l['digest'] for l in m['layers'] if 'model' in l.get('mediaType',''))
+print(os.path.expanduser('~/.ollama/models/blobs/' + digest.replace(':', '-')))
+")
+
+scp "$BLOB_PATH" <unity_id>@<CONSUMER_NODE_IP>:~/phi-2.Q4_K_M.gguf
+```
+
+You'll be prompted for your Unity password and Duo 2FA.
+
+Verify it arrived on VCL:
+```bash
+# On VCL (consumer node):
+ls -lh ~/phi-2.Q4_K_M.gguf
+# Expected: ~1.6G
+```
+
+---
+
+### Step 4 — Install llama-cpp-python on VCL
+
+`setup.sh` now handles this automatically (step 5/5). But if you already ran `setup.sh`
+before this feature was added, run the install manually:
+
+```bash
+# On VCL — compiles C++ bindings, takes 2-5 minutes:
+CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS" \
+    pip install --user llama-cpp-python
+
+# Verify:
+python3 -c "import llama_cpp; print('OK')"
+```
+
+> **If compile fails with "cmake not found":**
+> ```bash
+> conda install -y cmake
+> # then retry the pip install command above
+> ```
+
+> **If it fails with "OpenBLAS not found"** (slower but still works):
+> ```bash
+> pip install --user llama-cpp-python
+> ```
+
+---
+
+### Step 5 — Test the LLM fallback
+
+Restart `consumer.py` after installing (the model loads into the running process):
+```bash
+# Terminal 2 on the consumer node — Ctrl+C to stop, then:
+python3 consumer.py
+```
+
+Now send an error that the regex rules don't cover (Terminal 3):
+```bash
+export KAFKA_BROKER=<broker_IP>:9092   # skip if single-machine
+echo "RuntimeError: CUDA out of memory. Tried to allocate 2.00 GiB" | python3 fixit.py
+```
+
+Expected output (fix prefixed with `[LLM]`):
+```
+Analyzing error...
+
+  Error Type : RuntimeError
+  Fix        : [LLM] Reduce batch size or use gradient checkpointing to lower GPU memory usage.
+
+```
+
+The first call also prints this to the consumer terminal:
+```
+[LLM] First LLM call — loading Phi-2 model from ~/phi-2.Q4_K_M.gguf ...
+[LLM] This takes ~10s. Subsequent calls this session are instant.
+[LLM] Model ready.
+```
+
+---
+
+### How the fallback works
+
+```
+error text
+    │
+    ▼
+regex rules  (instant — rules.py RULES list)
+    │
+    ├── match → return fix immediately
+    │
+    └── no match → llm_fallback.py
+                       │
+                       ├── model not installed → "No known fix found..."
+                       ├── model file missing  → "No known fix found..."
+                       └── model loaded → Phi-2 generates fix → "[LLM] ..."
+```
+
+The LLM is **optional** — if `phi-2.Q4_K_M.gguf` is missing or `llama-cpp-python`
+isn't installed, the system works exactly as before, returning the default "no fix found" message.
+
+---
+
+### LLM Troubleshooting
+
+#### Consumer log shows `[LLM] llama-cpp-python not installed`
+Run Step 4 above, then restart `consumer.py`.
+
+#### Consumer log shows `[LLM] Model file not found`
+Run Step 3 above (scp the `.gguf` file to `~/phi-2.Q4_K_M.gguf`).
+
+#### First inference takes >30 seconds
+Normal on 4 CPU cores with a cold start. Subsequent calls in the same session are ~5s.
+
+#### Fix quality is poor
+Phi-2 is a small model — it works well for common error patterns but may produce generic
+suggestions for very domain-specific errors. Regex rules always win if they match; add
+more rules to `rules.py` for patterns you see frequently.
+
+---
+
 ### Pre-Demo Checklist
 
 - [ ] VCL reservation is active and won't expire mid-demo (`vcl.ncsu.edu`)
@@ -589,3 +786,5 @@ echo "ModuleNotFoundError: No module named 'pandas'" | python3 fixit.py
 - [ ] Terminal 2: `consumer.py` showing `Listening on topic 'error_stream'`
 - [ ] Terminal 3: quick test echo returns a fix
 - [ ] If new VM: ran `create_topics.sh` before `consumer.py`
+- [ ] (LLM) `~/phi-2.Q4_K_M.gguf` exists on the consumer node (`ls -lh ~/phi-2.Q4_K_M.gguf`)
+- [ ] (LLM) `python3 -c "import llama_cpp; print('OK')"` prints OK on consumer node
