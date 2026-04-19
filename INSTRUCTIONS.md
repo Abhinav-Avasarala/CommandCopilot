@@ -28,8 +28,12 @@ python3 --version
 
 # pip packages
 pip3 install kafka-python
+pip3 install pyspark==3.5.0
 pip3 install llama-cpp-python    # for LLM fallback (optional — see Part 4)
 ```
+
+> **Spark Kafka connector JARs:** on your local machine Spark can download these automatically
+> the first time you run `spark_consumer.py` (requires internet). No extra setup needed locally.
 
 ---
 
@@ -80,15 +84,20 @@ Kafka is running on localhost:9092
 bash create_topics.sh
 ```
 
-Then start the worker:
+Then start the Spark worker:
 ```bash
-python3 consumer.py
+python3 spark_consumer.py
 ```
 
-Expected output:
+Expected output (Spark prints some WARN lines during startup — these are normal):
 ```
-[CONSUMER]  Connected. Listening on topic 'error_stream' ...
+[SPARK]  Streaming query started.
+[SPARK]  Reading from : error_stream
+[SPARK]  Writing to   : fix_stream
 ```
+
+> **First run only:** Spark downloads the Kafka connector JAR from Maven Central (~10 MB).
+> This requires internet and takes ~30 seconds. Subsequent runs are instant.
 
 **Leave this terminal open.**
 
@@ -126,11 +135,11 @@ Share that IP with everyone.
 
 ---
 
-### Machine 2 — Consumer/Worker
+### Machine 2 — Worker (Spark)
 
 ```bash
 export KAFKA_BROKER=192.168.x.x:9092   # ← Machine 1's IP
-python3 consumer.py
+python3 spark_consumer.py
 ```
 
 ---
@@ -190,7 +199,7 @@ python3 -c "import llama_cpp; print('OK')"
 ls -lh ~/phi-2.Q4_K_M.gguf
 ```
 
-Then restart `consumer.py`. On the first unmatched error, you'll see:
+Then restart `spark_consumer.py`. On the first unmatched error, you'll see:
 ```
 [LLM] Loading Phi-2 model ... (takes ~10s first time)
 ```
@@ -203,7 +212,7 @@ Then restart `consumer.py`. On the first unmatched error, you'll see:
 Kafka isn't running. Start it in Terminal 1: `bash start_kafka.sh`
 
 ### "Timed out. Is consumer.py still running?"
-Consumer crashed or isn't started. Restart it in Terminal 2.
+Spark worker crashed or isn't started. Restart it in Terminal 2: `python3 spark_consumer.py`
 
 ### Topics don't exist
 ```bash
@@ -229,7 +238,7 @@ lsof -ti:9092 | xargs kill
 |------|---------|
 | Start Kafka | `bash start_kafka.sh` |
 | Create topics (once) | `bash create_topics.sh` |
-| Start consumer | `python3 consumer.py` |
+| Start Spark worker | `python3 spark_consumer.py` |
 | Run test | `echo "error" \| python3 fixit.py` |
 | Stop Kafka | `bash stop_kafka.sh` + Ctrl+C in consumer terminal |
-| Multi-machine broker | `export KAFKA_BROKER=<IP>:9092` on consumer + producer |
+| Multi-machine broker | `export KAFKA_BROKER=<IP>:9092` on worker + producer |

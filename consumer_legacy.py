@@ -1,14 +1,11 @@
 """
-consumer.py — The backend worker that runs on HPC.
+consumer_legacy.py — Original kafka-python worker (kept for reference).
 
-What it does:
-  1. Connects to Kafka as a CONSUMER on the 'error_stream' topic
-  2. Waits for error messages to arrive
-  3. Runs the error through rules.py to find a fix
-  4. Connects to Kafka as a PRODUCER and sends the fix to 'fix_stream'
+Superseded by spark_consumer.py, which runs the same inference logic through
+Apache Spark Structured Streaming instead of a raw kafka-python loop.
 
-Run this BEFORE running fixit.py. Keep it running in the background.
-Usage: python consumer.py
+Can still be used as a simpler fallback if Spark is not available:
+  python3 consumer_legacy.py
 """
 
 import json

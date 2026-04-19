@@ -171,8 +171,9 @@ conda activate /share/dsa440s26/aavasar/my-env
 # Install build tools (needed to compile llama-cpp-python)
 conda install -c conda-forge cmake make gxx_linux-64 -y
 
-# Install kafka-python
+# Install Python packages
 pip install kafka-python
+pip install pyspark==3.5.0
 
 # Install llama-cpp-python (CPU-only, OpenMP disabled — compiles in ~3-5 min)
 CMAKE_ARGS="-DLLAMA_OPENMP=OFF" pip install llama-cpp-python
@@ -181,6 +182,7 @@ CMAKE_ARGS="-DLLAMA_OPENMP=OFF" pip install llama-cpp-python
 Verify everything installed:
 ```bash
 python3 -c "from kafka import KafkaConsumer; print('kafka-python OK')"
+python3 -c "from pyspark.sql import SparkSession; print('pyspark OK')"
 python3 -c "import llama_cpp; print('llama-cpp-python OK')"
 ```
 
@@ -235,21 +237,40 @@ error_stream
 fix_stream
 ```
 
-Now activate the conda environment and start the consumer worker:
+Now activate the conda environment, set the Spark JAR variable, and start the Spark worker:
 ```bash
 conda activate /share/dsa440s26/aavasar/my-env
-python3 consumer.py
+
+# Point Spark to the pre-downloaded Kafka connector JARs (Part 9)
+KAFKA_HOME=~/kafka_2.13-3.7.0
+JAR_DIR=/share/dsa440s26/aavasar/spark-kafka-jars
+export SPARK_KAFKA_JARS="$(echo \
+  "$JAR_DIR"/spark-sql-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/spark-token-provider-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/commons-pool2-2.11.1.jar \
+  "$KAFKA_HOME"/libs/kafka-clients-*.jar \
+  "$KAFKA_HOME"/libs/lz4-java-*.jar \
+  "$KAFKA_HOME"/libs/snappy-java-*.jar \
+  "$KAFKA_HOME"/libs/zstd-jni-*.jar \
+| tr ' ' ',')"
+
+python3 spark_consumer.py
 ```
 
-Expected output:
+Expected output (Spark prints some WARN lines during startup — these are normal):
 ```
-10:32:01  [CONSUMER]  Connecting to Kafka broker at localhost:9092 ...
-10:32:01  [CONSUMER]  Connected. Listening on topic 'error_stream' ...
-10:32:01  [CONSUMER]  Fixes will be sent to topic 'fix_stream'
-10:32:01  [CONSUMER]  ──────────────────────────────────────────────────
+10:32:00  [SPARK]  Starting Spark Structured Streaming worker ...
+10:32:00  [SPARK]  Kafka broker: localhost:9092
+24/01/15 10:32:01 WARN NativeCodeLoader: ...    ← normal Spark startup warnings
+24/01/15 10:32:03 WARN Utils: ...               ← ignore these
+10:32:05  [SPARK]  Streaming query started.
+10:32:05  [SPARK]  Reading from : error_stream
+10:32:05  [SPARK]  Writing to   : fix_stream
+10:32:05  [SPARK]  Checkpoint   : /tmp/copilot-spark-checkpoint
+10:32:05  [SPARK]  ──────────────────────────────────────────────────
 ```
 
-**Leave this terminal open. The consumer waits for errors to arrive.**
+**Leave this terminal open. Spark listens continuously for new micro-batches.**
 
 ---
 
@@ -346,17 +367,15 @@ Analyzing error...
 
 ### What Terminal 2 Shows During Each Test
 
-Every time you pipe an error, the consumer logs it:
+Every time you pipe an error, Spark processes the micro-batch and logs it:
 
 ```
-10:35:14  [CONSUMER]  New error received  (id=abc-123-...)
-10:35:14  [CONSUMER]    Error preview: ModuleNotFoundError: No module named 'pandas'
-10:35:14  [CONSUMER]    Fix determined: pip install pandas
-10:35:14  [CONSUMER]    Response sent to 'fix_stream'
-10:35:14  [CONSUMER]  ──────────────────────────────────────────────────
+10:35:15  [SPARK]  Batch 3: processed 1 error(s) → writing to 'fix_stream'
 ```
 
-This is the visual proof that the full Kafka pipeline worked.
+This is the visual proof that the full Kafka → Spark → Kafka pipeline worked.
+Spark processes in 1-second micro-batches, so the log line appears ~1 second after you
+send the error from Terminal 3.
 
 ---
 
@@ -366,7 +385,8 @@ This is the visual proof that the full Kafka pipeline worked.
 Kafka isn't running. In Terminal 1: `bash start_kafka.sh`
 
 ### "Is consumer.py still running?"
-Consumer crashed. In Terminal 2: `python3 consumer.py`
+Spark worker crashed or was never started. In Terminal 2: `python3 spark_consumer.py`
+(with `SPARK_KAFKA_JARS` set — see Part 9)
 
 ### Topics don't exist
 ```bash
@@ -487,20 +507,34 @@ bash create_topics.sh
 
 ---
 
-### Step 5 — Start consumer on Node 2
+### Step 5 — Start Spark worker on Node 2
 
-SSH into Node 2, then activate the conda env and tell it where the broker is:
+SSH into Node 2, then activate the conda env and set the broker + JAR variables:
 ```bash
 cd /share/dsa440s26/aavasar/terminal-copilot
 conda activate /share/dsa440s26/aavasar/my-env
 export KAFKA_BROKER=152.14.10.1:9092    # ← Node 1's IP
-python3 consumer.py
+
+KAFKA_HOME=~/kafka_2.13-3.7.0
+JAR_DIR=/share/dsa440s26/aavasar/spark-kafka-jars
+export SPARK_KAFKA_JARS="$(echo \
+  "$JAR_DIR"/spark-sql-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/spark-token-provider-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/commons-pool2-2.11.1.jar \
+  "$KAFKA_HOME"/libs/kafka-clients-*.jar \
+  "$KAFKA_HOME"/libs/lz4-java-*.jar \
+  "$KAFKA_HOME"/libs/snappy-java-*.jar \
+  "$KAFKA_HOME"/libs/zstd-jni-*.jar \
+| tr ' ' ',')"
+
+python3 spark_consumer.py
 ```
 
 Expected output:
 ```
-10:32:01  [CONSUMER]  Connecting to Kafka broker at 152.14.10.1:9092 ...
-10:32:01  [CONSUMER]  Connected. Listening on topic 'error_stream' ...
+10:32:05  [SPARK]  Streaming query started.
+10:32:05  [SPARK]  Reading from : error_stream
+10:32:05  [SPARK]  Writing to   : fix_stream
 ```
 
 ---
@@ -561,7 +595,7 @@ VCL sometimes blocks inter-node traffic at the network level. Check that both re
 | Setup (once per node) | all 3 | `bash setup.sh` |
 | Start broker | Node 1 | `bash start_kafka.sh` |
 | Create topics (once) | Node 1 | `bash create_topics.sh` |
-| Start consumer | Node 2 | `export KAFKA_BROKER=<Node1_IP>:9092 && python3 consumer.py` |
+| Start Spark worker | Node 2 | `export KAFKA_BROKER=<Node1_IP>:9092 && export SPARK_KAFKA_JARS=... && python3 spark_consumer.py` |
 | Run producer test | Node 3 | `export KAFKA_BROKER=<Node1_IP>:9092 && echo "error..." \| python3 fixit.py` |
 
 ---
@@ -578,9 +612,95 @@ VCL sometimes blocks inter-node traffic at the network level. Check that both re
 | Activate conda env | `conda activate /share/dsa440s26/aavasar/my-env` | T2, T3 |
 | Start Kafka | `bash start_kafka.sh` | T1 |
 | Create topics (once) | `bash create_topics.sh` | T2 |
-| Start consumer | `conda activate my-env && python3 consumer.py` | T2 |
+| Start Spark worker | `conda activate my-env && export SPARK_KAFKA_JARS=... && python3 spark_consumer.py` | T2 |
 | Quick test | `conda activate my-env && echo "error" \| python3 fixit.py` | T3 |
 | Stop everything | `bash stop_kafka.sh` + Ctrl+C in T2 | T1 |
+
+---
+
+## Part 9: Spark Kafka Connector Setup (No-Internet / VCL)
+
+Spark Structured Streaming needs extra JARs to talk to Kafka. On a machine **with internet**,
+Spark downloads these automatically the first time you run `spark_consumer.py` — no action needed.
+
+On VCL (no internet), you must download the JARs on your laptop and `scp` them over,
+exactly like you did for the Kafka tarball and the Phi-2 model.
+
+---
+
+### Which JARs you need
+
+Spark needs three small connector JARs (~2.5 MB total). The rest (kafka-clients, lz4, snappy,
+zstd) are already in your Kafka installation at `~/kafka_2.13-3.7.0/libs/`.
+
+---
+
+### Step 1 — Download the connector JARs on your laptop
+
+```bash
+mkdir spark-kafka-jars && cd spark-kafka-jars
+
+curl -O "https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.12/3.5.0/spark-sql-kafka-0-10_2.12-3.5.0.jar"
+curl -O "https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.12/3.5.0/spark-token-provider-kafka-0-10_2.12-3.5.0.jar"
+curl -O "https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar"
+```
+
+Verify the files are real (not redirect HTML):
+```bash
+ls -lh *.jar
+# Expected sizes: ~1.8 MB, ~60 KB, ~240 KB respectively
+```
+
+---
+
+### Step 2 — Copy JARs to VCL
+
+```bash
+scp *.jar <unity_id>@<VCL_IP>:/share/dsa440s26/aavasar/spark-kafka-jars/
+```
+
+---
+
+### Step 3 — Set the SPARK_KAFKA_JARS environment variable on VCL
+
+`spark_consumer.py` reads this variable to find the JARs instead of downloading them.
+Run this in any terminal where you'll launch the Spark worker (or add it to `~/.bashrc`):
+
+```bash
+KAFKA_HOME=~/kafka_2.13-3.7.0
+JAR_DIR=/share/dsa440s26/aavasar/spark-kafka-jars
+
+export SPARK_KAFKA_JARS="$(echo \
+  "$JAR_DIR"/spark-sql-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/spark-token-provider-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/commons-pool2-2.11.1.jar \
+  "$KAFKA_HOME"/libs/kafka-clients-*.jar \
+  "$KAFKA_HOME"/libs/lz4-java-*.jar \
+  "$KAFKA_HOME"/libs/snappy-java-*.jar \
+  "$KAFKA_HOME"/libs/zstd-jni-*.jar \
+| tr ' ' ',')"
+```
+
+Verify it looks right (a comma-separated list of full paths):
+```bash
+echo $SPARK_KAFKA_JARS
+```
+
+---
+
+### Troubleshooting Spark connector issues
+
+#### `ClassNotFoundException: org.apache.spark.sql.kafka010`
+The connector JAR is missing or not on Spark's classpath. Check `SPARK_KAFKA_JARS` is set
+and all paths exist: `ls -lh $(echo $SPARK_KAFKA_JARS | tr ',' '\n')`.
+
+#### `FileNotFoundException` for a Kafka lib (lz4, snappy, zstd)
+The glob `"$KAFKA_HOME"/libs/lz4-java-*.jar` matched nothing — the file version differs.
+Find the actual name: `ls ~/kafka_2.13-3.7.0/libs/ | grep lz4` and hardcode that path.
+
+#### Spark tries to download from Maven and times out
+`SPARK_KAFKA_JARS` is not set. Export it in the same terminal before running
+`spark_consumer.py`, or add the `export` to `~/.bashrc` and `source ~/.bashrc`.
 
 ---
 
@@ -613,12 +733,25 @@ cd /share/dsa440s26/aavasar/terminal-copilot
 bash start_kafka.sh
 ```
 
-**Terminal 2 — Start Consumer:**
+**Terminal 2 — Start Spark Worker:**
 ```bash
 ssh aavasar@<VCL_IP>
 cd /share/dsa440s26/aavasar/terminal-copilot
 conda activate /share/dsa440s26/aavasar/my-env
-python3 consumer.py
+
+KAFKA_HOME=~/kafka_2.13-3.7.0
+JAR_DIR=/share/dsa440s26/aavasar/spark-kafka-jars
+export SPARK_KAFKA_JARS="$(echo \
+  "$JAR_DIR"/spark-sql-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/spark-token-provider-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/commons-pool2-2.11.1.jar \
+  "$KAFKA_HOME"/libs/kafka-clients-*.jar \
+  "$KAFKA_HOME"/libs/lz4-java-*.jar \
+  "$KAFKA_HOME"/libs/snappy-java-*.jar \
+  "$KAFKA_HOME"/libs/zstd-jni-*.jar \
+| tr ' ' ',')"
+
+python3 spark_consumer.py
 ```
 
 **Terminal 3 — Run Tests:**
@@ -768,10 +901,10 @@ python3 -c "import llama_cpp; print('OK')"
 
 ### Step 5 — Test the LLM fallback
 
-Restart `consumer.py` after installing (the model loads into the running process):
+Restart `spark_consumer.py` after installing (the model loads on the first unmatched error):
 ```bash
-# Terminal 2 on the consumer node — Ctrl+C to stop, then:
-python3 consumer.py
+# Terminal 2 on the worker node — Ctrl+C to stop, then:
+python3 spark_consumer.py
 ```
 
 Now send an error that the regex rules don't cover (Terminal 3):
@@ -822,10 +955,10 @@ isn't installed, the system works exactly as before, returning the default "no f
 
 ### LLM Troubleshooting
 
-#### Consumer log shows `[LLM] llama-cpp-python not installed`
-Run Step 4 above, then restart `consumer.py`.
+#### Worker log shows `[LLM] llama-cpp-python not installed`
+Run Step 4 above, then restart `spark_consumer.py`.
 
-#### Consumer log shows `[LLM] Model file not found`
+#### Worker log shows `[LLM] Model file not found`
 Run Step 3 above (scp the `.gguf` file to `/share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf`).
 
 #### First inference takes >30 seconds
@@ -842,8 +975,10 @@ more rules to `rules.py` for patterns you see frequently.
 
 - [ ] VCL reservation is active and won't expire mid-demo (`vcl.ncsu.edu`)
 - [ ] Terminal 1: `start_kafka.sh` running with no errors
-- [ ] Terminal 2: `consumer.py` showing `Listening on topic 'error_stream'`
+- [ ] Spark connector JARs exist on the worker node (`ls /share/dsa440s26/aavasar/spark-kafka-jars/`)
+- [ ] `SPARK_KAFKA_JARS` is exported in Terminal 2 (run `echo $SPARK_KAFKA_JARS` to verify)
+- [ ] Terminal 2: `spark_consumer.py` showing `Streaming query started`
 - [ ] Terminal 3: quick test echo returns a fix
-- [ ] If new VM: ran `create_topics.sh` before `consumer.py`
-- [ ] (LLM) Model exists on consumer node (`ls -lh /share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf`)
-- [ ] (LLM) `python3 -c "import llama_cpp; print('OK')"` prints OK on consumer node
+- [ ] If new VM: ran `create_topics.sh` before `spark_consumer.py`
+- [ ] (LLM) Model exists on worker node (`ls -lh /share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf`)
+- [ ] (LLM) `python3 -c "import llama_cpp; print('OK')"` prints OK on worker node

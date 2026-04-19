@@ -122,12 +122,19 @@ conda install -c conda-forge cmake make gxx_linux-64 -y
 
 # Python dependencies
 pip install kafka-python
+pip install pyspark==3.5.0
 CMAKE_ARGS="-DLLAMA_OPENMP=OFF" pip install llama-cpp-python
 
 # Verify
 python3 -c "from kafka import KafkaConsumer; print('kafka-python OK')"
+python3 -c "from pyspark.sql import SparkSession; print('pyspark OK')"
 python3 -c "import llama_cpp; print('llama-cpp-python OK')"
 ```
+
+> **Spark Kafka connector JARs (Henry2 has no internet):** download the three connector JARs
+> on your laptop and `scp` them to `/share/<group>/<uid>/spark-kafka-jars/`.
+> See INSTRUCTIONS_VCL.md Part 9 for the exact URLs and `scp` commands — the process is
+> identical to downloading the Kafka tarball.
 
 > `-DLLAMA_OPENMP=OFF` avoids linker errors caused by missing `libgomp` (no sudo to install it).
 
@@ -207,10 +214,30 @@ cd /share/<your_group>/<unity_id>/terminal-copilot
 bash create_topics.sh
 ```
 
-Then start the worker:
+Then start the Spark worker:
 ```bash
 conda activate /share/<your_group>/<unity_id>/hpc-env
-python3 consumer.py
+
+KAFKA_HOME=~/kafka_2.13-3.7.0
+JAR_DIR=/share/<your_group>/<unity_id>/spark-kafka-jars
+export SPARK_KAFKA_JARS="$(echo \
+  "$JAR_DIR"/spark-sql-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/spark-token-provider-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/commons-pool2-2.11.1.jar \
+  "$KAFKA_HOME"/libs/kafka-clients-*.jar \
+  "$KAFKA_HOME"/libs/lz4-java-*.jar \
+  "$KAFKA_HOME"/libs/snappy-java-*.jar \
+  "$KAFKA_HOME"/libs/zstd-jni-*.jar \
+| tr ' ' ',')"
+
+python3 spark_consumer.py
+```
+
+Expected output:
+```
+[SPARK]  Streaming query started.
+[SPARK]  Reading from : error_stream
+[SPARK]  Writing to   : fix_stream
 ```
 
 **Leave this terminal open.**
@@ -269,12 +296,25 @@ bash create_topics.sh
 
 ---
 
-### Step 3 — Consumer node
+### Step 3 — Worker node (Spark)
 
 ```bash
 conda activate /share/<group>/<unity_id>/hpc-env
 export KAFKA_BROKER=<broker_node_IP>:9092
-python3 consumer.py
+
+KAFKA_HOME=~/kafka_2.13-3.7.0
+JAR_DIR=/share/<group>/<unity_id>/spark-kafka-jars
+export SPARK_KAFKA_JARS="$(echo \
+  "$JAR_DIR"/spark-sql-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/spark-token-provider-kafka-0-10_2.12-3.5.0.jar \
+  "$JAR_DIR"/commons-pool2-2.11.1.jar \
+  "$KAFKA_HOME"/libs/kafka-clients-*.jar \
+  "$KAFKA_HOME"/libs/lz4-java-*.jar \
+  "$KAFKA_HOME"/libs/snappy-java-*.jar \
+  "$KAFKA_HOME"/libs/zstd-jni-*.jar \
+| tr ' ' ',')"
+
+python3 spark_consumer.py
 ```
 
 ---
@@ -333,6 +373,6 @@ to the path it expects.
 | Activate env | `conda activate /share/<group>/<uid>/hpc-env` | Before python commands |
 | Start Kafka | `bash start_kafka.sh` | Terminal 1 |
 | Create topics (once) | `bash create_topics.sh` | Terminal 2 |
-| Start consumer | `conda activate ... && python3 consumer.py` | Terminal 2 |
+| Start Spark worker | `conda activate ... && export SPARK_KAFKA_JARS=... && python3 spark_consumer.py` | Terminal 2 |
 | Run test | `conda activate ... && echo "error" \| python3 fixit.py` | Terminal 3 |
 | Stop Kafka | `bash stop_kafka.sh` + Ctrl+C in consumer | Terminal 1 |
