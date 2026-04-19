@@ -653,11 +653,28 @@ ls -lh *.jar
 
 ---
 
-### Step 2 — Copy JARs to VCL
+### Step 2 — Get the JARs onto VCL
 
+**Option A — Download directly on VCL with curl (recommended if VCL has internet):**
+```bash
+mkdir -p /share/dsa440s26/aavasar/spark-kafka-jars
+cd /share/dsa440s26/aavasar/spark-kafka-jars
+curl -O "https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.12/3.5.0/spark-sql-kafka-0-10_2.12-3.5.0.jar"
+curl -O "https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.12/3.5.0/spark-token-provider-kafka-0-10_2.12-3.5.0.jar"
+curl -O "https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar"
+```
+
+**Option B — SCP from your laptop (if VCL has no curl/internet access):**
 ```bash
 scp *.jar <unity_id>@<VCL_IP>:/share/dsa440s26/aavasar/spark-kafka-jars/
 ```
+
+> **Note:** `spark.jars.packages` (Spark's built-in Maven download) does **not** work on VCL
+> even if `ping` succeeds — Maven Central is blocked at the firewall level. Always use
+> curl or scp to get the JARs manually.
+
+> **Multi-node:** Because `/share/dsa440s26/aavasar/` is a shared GPFS filesystem, these JARs
+> are visible from **all 3 nodes** once downloaded. You only need to do this step once.
 
 ---
 

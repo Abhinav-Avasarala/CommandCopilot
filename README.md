@@ -103,6 +103,8 @@ All three guides cover single-node and multi-node configurations, the conda envi
 
 **Why Spark Structured Streaming?** Spark treats the Kafka `error_stream` topic as an infinite streaming table. Each micro-batch is processed as a standard DataFrame transformation — the same regex and LLM logic runs as Spark UDFs, giving the system a proper distributed stream processing layer on top of the Kafka pipeline.
 
+**Spark Kafka connector JARs:** Spark needs three small connector JARs (~620 KB total) to talk to Kafka. On a machine with open internet access, Spark downloads these automatically via Maven Central on first run. On VCL/HPC where Maven Central is blocked, download them once with `curl` directly on the node (or `scp` from your laptop) and point Spark to them via the `SPARK_KAFKA_JARS` env var. Since all VCL nodes share the same GPFS filesystem (`/share/dsa440s26/aavasar/`), the JARs only need to be downloaded **once** — every node can read them from the same path. See INSTRUCTIONS_VCL.md Part 9 for exact commands.
+
 **Why regex first?** Common errors (missing modules, port conflicts, syntax errors) have deterministic fixes. Regex handles these in milliseconds. The LLM is only invoked when the pattern is novel, keeping latency low for the majority of cases.
 
 **Why Phi-2?** At 2.7B parameters (Q4, ~1.6 GB), it runs on a CPU-only node with 4 cores and 31 GB RAM in roughly 5 seconds per inference — acceptable for a "regex missed" fallback. It was also trained heavily on code and error-style text, which suits this task better than a general-purpose model of the same size.
