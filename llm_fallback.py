@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 # /share/dsa440s26 has 20 TB and is the correct location for large data files on NCSU HPC.
 MODEL_PATH = "/share/dsa440s26/aavasar/phi-2.Q4_K_M.gguf"
 N_THREADS   = 4    # match the 4 CPU cores on the VCL machine
-N_CTX       = 512  # small context window — faster inference, enough for error text
+N_CTX       = 2048  # full context window matching model's training context
 MAX_TOKENS  = 80   # fix suggestions are short; stop generating early
 
 # Module-level cache — model loads once per consumer.py process, reused after that
